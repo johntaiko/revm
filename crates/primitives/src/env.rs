@@ -24,7 +24,6 @@ pub struct BlockEnv {
     /// Coinbase or miner or address that created and signed the block.
     /// Address where we are going to send gas spend
     pub coinbase: B160,
-    pub treasury: B160,
     pub timestamp: U256,
     /// Difficulty is removed and not used after Paris (aka TheMerge). Value is replaced with prevrandao.
     pub difficulty: U256,
@@ -178,7 +177,6 @@ impl Default for BlockEnv {
         BlockEnv {
             gas_limit: U256::MAX,
             number: U256::ZERO,
-            treasury: B160::zero(),
             coinbase: B160::zero(),
             timestamp: U256::from(1),
             difficulty: U256::ZERO,

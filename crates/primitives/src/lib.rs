@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod anchor;
 pub mod bits;
 pub mod bytecode;
 pub mod db;
@@ -37,5 +38,3 @@ pub use ruint::uint;
 pub use specification::*;
 pub use state::*;
 pub use utilities::*;
-
-mod anchor;

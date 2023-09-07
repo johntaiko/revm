@@ -9,6 +9,10 @@ static GOLDEN_TOUCH_ACCOUNT: Lazy<B160> = Lazy::new(|| {
         .expect("invalid golden touch account")
 });
 
+pub static TREASURY: Lazy<B160> = Lazy::new(|| {
+    B160::from_str("0xdf09A0afD09a63fb04ab3573922437e1e637dE8b").expect("invalid treasury account")
+});
+
 pub(crate) fn validate(env: &Env) -> bool {
     !env.is_anchor()
         || (env.tx.tx_type != TxType::Eip1559
