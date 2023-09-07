@@ -354,13 +354,13 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
                 (effective_gas_price, U256::ZERO)
             };
 
-            // TODO
-            let _ = self
-                .data
-                .journaled_state
-                .load_account(coinbase, self.data.db);
-            self.data.journaled_state.touch(&coinbase);
             if !is_anchor {
+                // TODO
+                let _ = self
+                    .data
+                    .journaled_state
+                    .load_account(coinbase, self.data.db);
+                self.data.journaled_state.touch(&coinbase);
                 let acc_coinbase = self
                     .data
                     .journaled_state
@@ -371,6 +371,12 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
                     .info
                     .balance
                     .saturating_add(coinbase_gas_price * U256::from(gas.spend() - gas_refunded));
+
+                let _ = self
+                    .data
+                    .journaled_state
+                    .load_account(treasury, self.data.db);
+                self.data.journaled_state.touch(&treasury);
                 let acc_treasury = self
                     .data
                     .journaled_state
