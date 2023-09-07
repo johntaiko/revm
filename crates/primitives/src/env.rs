@@ -1,4 +1,4 @@
-use crate::{alloc::vec::Vec, SpecId, B160, B256, U256};
+use crate::{alloc::vec::Vec, EVMError, InvalidTransaction, SpecId, B160, B256, U256};
 use bytes::Bytes;
 use core::cmp::min;
 
@@ -8,7 +8,15 @@ pub struct Env {
     pub cfg: CfgEnv,
     pub block: BlockEnv,
     pub tx: TxEnv,
+    pub taiko: TaikoEnv,
 }
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TaikoEnv {
+    pub l2_address: B160,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockEnv {
@@ -16,6 +24,7 @@ pub struct BlockEnv {
     /// Coinbase or miner or address that created and signed the block.
     /// Address where we are going to send gas spend
     pub coinbase: B160,
+    pub treasury: B160,
     pub timestamp: U256,
     /// Difficulty is removed and not used after Paris (aka TheMerge). Value is replaced with prevrandao.
     pub difficulty: U256,
@@ -27,10 +36,19 @@ pub struct BlockEnv {
     pub gas_limit: U256,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TxType {
+    Legacy,
+    Eip2930,
+    Eip1559,
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TxEnv {
     /// Caller or Author or tx signer
+    pub index: usize,
     pub caller: B160,
     pub gas_limit: u64,
     pub gas_price: U256,
@@ -42,9 +60,10 @@ pub struct TxEnv {
     pub chain_id: Option<u64>,
     pub nonce: Option<u64>,
     pub access_list: Vec<(B160, Vec<U256>)>,
+    pub tx_type: TxType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactTo {
     Call(B160),
@@ -159,6 +178,7 @@ impl Default for BlockEnv {
         BlockEnv {
             gas_limit: U256::MAX,
             number: U256::ZERO,
+            treasury: B160::zero(),
             coinbase: B160::zero(),
             timestamp: U256::from(1),
             difficulty: U256::ZERO,
@@ -171,6 +191,7 @@ impl Default for BlockEnv {
 impl Default for TxEnv {
     fn default() -> TxEnv {
         TxEnv {
+            index: 0,
             caller: B160::zero(),
             gas_limit: u64::MAX,
             gas_price: U256::ZERO,
@@ -181,11 +202,23 @@ impl Default for TxEnv {
             chain_id: None,
             nonce: None,
             access_list: Vec::new(),
+            tx_type: TxType::Legacy,
         }
     }
 }
 
 impl Env {
+    pub fn pre_check<DB>(&self) -> Result<(), EVMError<DB>> {
+        if !crate::anchor::validate(self) {
+            return Err(InvalidTransaction::InvalidAnchorTransaction.into());
+        }
+        Ok(())
+    }
+
+    pub fn is_anchor(&self) -> bool {
+        self.tx.index == 0
+    }
+
     pub fn effective_gas_price(&self) -> U256 {
         if self.tx.gas_priority_fee.is_none() {
             self.tx.gas_price

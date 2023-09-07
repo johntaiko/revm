@@ -64,6 +64,7 @@ impl<DB: Database> EVM<DB> {
     pub fn transact(&mut self) -> EVMResult<DB::Error> {
         if let Some(db) = self.db.as_mut() {
             let mut noop = NoOpInspector {};
+            self.env.pre_check()?;
             let out = evm_inner::<DB, false>(&mut self.env, db, &mut noop).transact();
             out
         } else {

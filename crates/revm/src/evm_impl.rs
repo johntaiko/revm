@@ -46,6 +46,7 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> Transact<DB::Error>
         let data = self.data.env.tx.data.clone();
         let gas_limit = self.data.env.tx.gas_limit;
         let effective_gas_price = self.data.env.effective_gas_price();
+        let is_anchor = self.data.env.is_anchor();
 
         if GSPEC::enabled(MERGE) && self.data.env.block.prevrandao.is_none() {
             return Err(EVMError::PrevrandaoNotSet);
@@ -164,7 +165,7 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> Transact<DB::Error>
 
         // Check if account has enough balance for gas_limit*gas_price and value transfer.
         // Transfer will be done inside `*_inner` functions.
-        if balance_check > *caller_balance && !disable_balance_check {
+        if balance_check > *caller_balance && !disable_balance_check && !is_anchor {
             return Err(InvalidTransaction::LackOfFundForGasLimit {
                 gas_limit: balance_check,
                 balance: *caller_balance,
@@ -174,9 +175,11 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> Transact<DB::Error>
 
         // Reduce gas_limit*gas_price amount of caller account.
         // unwrap_or can only occur if disable_balance_check is enabled
-        *caller_balance = caller_balance
-            .checked_sub(U256::from(gas_limit) * effective_gas_price)
-            .unwrap_or(U256::ZERO);
+        if !is_anchor {
+            *caller_balance = caller_balance
+                .checked_sub(U256::from(gas_limit) * effective_gas_price)
+                .unwrap_or(U256::ZERO);
+        }
 
         let mut gas = Gas::new(gas_limit);
         // record initial gas cost. if not using gas metering init will return.
@@ -259,7 +262,7 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> Transact<DB::Error>
             }
         }
 
-        let (state, logs, gas_used, gas_refunded) = self.finalize::<GSPEC>(caller, &gas);
+        let (state, logs, gas_used, gas_refunded) = self.finalize::<GSPEC>(caller, &gas, is_anchor);
 
         let result = match exit_reason.into() {
             SuccessOrHalt::Success(reason) => ExecutionResult::Success {
@@ -318,8 +321,10 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
         &mut self,
         caller: B160,
         gas: &Gas,
+        is_anchor: bool,
     ) -> (HashMap<B160, Account>, Vec<Log>, u64, u64) {
         let coinbase = self.data.env.block.coinbase;
+        let treasury = self.data.env.block.treasury;
         let (gas_used, gas_refunded) = if crate::USE_GAS {
             let effective_gas_price = self.data.env.effective_gas_price();
             let basefee = self.data.env.block.basefee;
@@ -336,17 +341,17 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
                 let max_refund_quotient = if SPEC::enabled(LONDON) { 5 } else { 2 };
                 min(gas.refunded() as u64, gas.spend() / max_refund_quotient)
             };
-            let acc_caller = self.data.journaled_state.state().get_mut(&caller).unwrap();
-            acc_caller.info.balance = acc_caller
-                .info
-                .balance
-                .saturating_add(effective_gas_price * U256::from(gas.remaining() + gas_refunded));
-
+            if !is_anchor {
+                let acc_caller = self.data.journaled_state.state().get_mut(&caller).unwrap();
+                acc_caller.info.balance = acc_caller.info.balance.saturating_add(
+                    effective_gas_price * U256::from(gas.remaining() + gas_refunded),
+                );
+            }
             // EIP-1559
-            let coinbase_gas_price = if SPEC::enabled(LONDON) {
-                effective_gas_price.saturating_sub(basefee)
+            let (coinbase_gas_price, basefee) = if SPEC::enabled(LONDON) {
+                (effective_gas_price.saturating_sub(basefee), basefee)
             } else {
-                effective_gas_price
+                (effective_gas_price, U256::ZERO)
             };
 
             // TODO
@@ -355,16 +360,28 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
                 .journaled_state
                 .load_account(coinbase, self.data.db);
             self.data.journaled_state.touch(&coinbase);
-            let acc_coinbase = self
-                .data
-                .journaled_state
-                .state()
-                .get_mut(&coinbase)
-                .unwrap();
-            acc_coinbase.info.balance = acc_coinbase
-                .info
-                .balance
-                .saturating_add(coinbase_gas_price * U256::from(gas.spend() - gas_refunded));
+            if !is_anchor {
+                let acc_coinbase = self
+                    .data
+                    .journaled_state
+                    .state()
+                    .get_mut(&coinbase)
+                    .unwrap();
+                acc_coinbase.info.balance = acc_coinbase
+                    .info
+                    .balance
+                    .saturating_add(coinbase_gas_price * U256::from(gas.spend() - gas_refunded));
+                let acc_treasury = self
+                    .data
+                    .journaled_state
+                    .state()
+                    .get_mut(&treasury)
+                    .unwrap();
+                acc_treasury.info.balance = acc_treasury
+                    .info
+                    .balance
+                    .saturating_add(basefee * U256::from(gas.spend() - gas_refunded));
+            }
             (gas.spend() - gas_refunded, gas_refunded)
         } else {
             // touch coinbase
