@@ -15,11 +15,11 @@ pub static TREASURY: Lazy<B160> = Lazy::new(|| {
 
 pub(crate) fn validate(env: &Env) -> bool {
     !env.is_anchor()
-        || (env.tx.tx_type != TxType::Eip1559
-            && env.tx.transact_to != TransactTo::Call(env.taiko.l2_address)
-            && u32::from_be_bytes(env.tx.data[..4].try_into().unwrap()) != ANCHOR_SELECTOR
-            && env.tx.value != U256::ZERO
-            && env.tx.gas_limit != ANCHOR_GAS_LIMIT
-            && env.tx.gas_price != env.block.basefee
-            && env.tx.caller != *GOLDEN_TOUCH_ACCOUNT)
+        || (env.tx.tx_type == TxType::Eip1559
+            && env.tx.transact_to == TransactTo::Call(env.taiko.l2_address)
+            && u32::from_be_bytes(env.tx.data[..4].try_into().unwrap()) == ANCHOR_SELECTOR
+            && env.tx.value == U256::ZERO
+            && env.tx.gas_limit == ANCHOR_GAS_LIMIT
+            && env.tx.gas_price == env.block.basefee
+            && env.tx.caller == *GOLDEN_TOUCH_ACCOUNT)
 }
