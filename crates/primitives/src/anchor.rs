@@ -2,7 +2,7 @@ use crate::{Env, TransactTo, TxType, B160, U256};
 use once_cell::sync::Lazy;
 use std::str::FromStr;
 
-const ANCHOR_SELECTOR: u32 = 0x3d384a4b;
+const ANCHOR_SELECTOR: u32 = 0xda69d3db;
 const ANCHOR_GAS_LIMIT: u64 = 180_000;
 static GOLDEN_TOUCH_ACCOUNT: Lazy<B160> = Lazy::new(|| {
     B160::from_str("0x0000777735367b36bC9B61C50022d9D0700dB4Ec")
