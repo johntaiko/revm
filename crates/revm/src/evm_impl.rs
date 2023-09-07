@@ -325,80 +325,78 @@ impl<'a, GSPEC: Spec, DB: Database, const INSPECT: bool> EVMImpl<'a, GSPEC, DB, 
     ) -> (HashMap<B160, Account>, Vec<Log>, u64, u64) {
         let coinbase = self.data.env.block.coinbase;
         let treasury = *crate::primitives::anchor::TREASURY;
-        let (gas_used, gas_refunded) = if crate::USE_GAS {
-            let effective_gas_price = self.data.env.effective_gas_price();
-            let basefee = self.data.env.block.basefee;
+        let (gas_used, gas_refunded) =
+            if crate::USE_GAS {
+                let effective_gas_price = self.data.env.effective_gas_price();
+                let basefee = self.data.env.block.basefee;
 
-            #[cfg(feature = "optional_gas_refund")]
-            let disable_gas_refund = self.env().cfg.disable_gas_refund;
-            #[cfg(not(feature = "optional_gas_refund"))]
-            let disable_gas_refund = false;
+                #[cfg(feature = "optional_gas_refund")]
+                let disable_gas_refund = self.env().cfg.disable_gas_refund;
+                #[cfg(not(feature = "optional_gas_refund"))]
+                let disable_gas_refund = false;
 
-            let gas_refunded = if disable_gas_refund {
-                0
-            } else {
-                // EIP-3529: Reduction in refunds
-                let max_refund_quotient = if SPEC::enabled(LONDON) { 5 } else { 2 };
-                min(gas.refunded() as u64, gas.spend() / max_refund_quotient)
-            };
-            if !is_anchor {
+                let gas_refunded = if disable_gas_refund {
+                    0
+                } else {
+                    // EIP-3529: Reduction in refunds
+                    let max_refund_quotient = if SPEC::enabled(LONDON) { 5 } else { 2 };
+                    min(gas.refunded() as u64, gas.spend() / max_refund_quotient)
+                };
                 let acc_caller = self.data.journaled_state.state().get_mut(&caller).unwrap();
                 acc_caller.info.balance = acc_caller.info.balance.saturating_add(
                     effective_gas_price * U256::from(gas.remaining() + gas_refunded),
                 );
-            }
-            // EIP-1559
-            let (coinbase_gas_price, basefee) = if SPEC::enabled(LONDON) {
-                (effective_gas_price.saturating_sub(basefee), basefee)
-            } else {
-                (effective_gas_price, U256::ZERO)
-            };
+                // EIP-1559
+                let (coinbase_gas_price, basefee) = if SPEC::enabled(LONDON) {
+                    (effective_gas_price.saturating_sub(basefee), basefee)
+                } else {
+                    (effective_gas_price, U256::ZERO)
+                };
 
-            if !is_anchor {
-                // TODO
+                if !is_anchor {
+                    // TODO
+                    let _ = self
+                        .data
+                        .journaled_state
+                        .load_account(coinbase, self.data.db);
+                    self.data.journaled_state.touch(&coinbase);
+                    let acc_coinbase = self
+                        .data
+                        .journaled_state
+                        .state()
+                        .get_mut(&coinbase)
+                        .unwrap();
+                    acc_coinbase.info.balance = acc_coinbase.info.balance.saturating_add(
+                        coinbase_gas_price * U256::from(gas.spend() - gas_refunded),
+                    );
+
+                    let _ = self
+                        .data
+                        .journaled_state
+                        .load_account(treasury, self.data.db);
+                    self.data.journaled_state.touch(&treasury);
+                    let acc_treasury = self
+                        .data
+                        .journaled_state
+                        .state()
+                        .get_mut(&treasury)
+                        .unwrap();
+                    acc_treasury.info.balance = acc_treasury
+                        .info
+                        .balance
+                        .saturating_add(basefee * U256::from(gas.spend() - gas_refunded));
+                }
+                (gas.spend() - gas_refunded, gas_refunded)
+            } else {
+                // touch coinbase
+                // TODO return
                 let _ = self
                     .data
                     .journaled_state
                     .load_account(coinbase, self.data.db);
                 self.data.journaled_state.touch(&coinbase);
-                let acc_coinbase = self
-                    .data
-                    .journaled_state
-                    .state()
-                    .get_mut(&coinbase)
-                    .unwrap();
-                acc_coinbase.info.balance = acc_coinbase
-                    .info
-                    .balance
-                    .saturating_add(coinbase_gas_price * U256::from(gas.spend() - gas_refunded));
-
-                let _ = self
-                    .data
-                    .journaled_state
-                    .load_account(treasury, self.data.db);
-                self.data.journaled_state.touch(&treasury);
-                let acc_treasury = self
-                    .data
-                    .journaled_state
-                    .state()
-                    .get_mut(&treasury)
-                    .unwrap();
-                acc_treasury.info.balance = acc_treasury
-                    .info
-                    .balance
-                    .saturating_add(basefee * U256::from(gas.spend() - gas_refunded));
-            }
-            (gas.spend() - gas_refunded, gas_refunded)
-        } else {
-            // touch coinbase
-            // TODO return
-            let _ = self
-                .data
-                .journaled_state
-                .load_account(coinbase, self.data.db);
-            self.data.journaled_state.touch(&coinbase);
-            (0, 0)
-        };
+                (0, 0)
+            };
         let (mut new_state, logs) = self.data.journaled_state.finalize();
         // precompiles are special case. If there is precompiles in finalized Map that means some balance is
         // added to it, we need now to load precompile address from db and add this amount to it so that we
